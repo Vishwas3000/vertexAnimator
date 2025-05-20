@@ -9,6 +9,12 @@ class ViewController: UIViewController, ARSCNViewDelegate {
     // The distance at which to place the cube from the camera
     let cubeDistance: Float = 0.5 // You can adjust this value (in meters)
     
+    // Animation properties
+    var gradientNodes: [SCNNode] = []
+    var animationTimer: Timer?
+    var progressTime: Double = 2.0
+    var currentProgress: Double = 0.0
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -27,6 +33,8 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Add tap gesture recognizer
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         sceneView.addGestureRecognizer(tapGesture)
+        
+        // Start the animation timer
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -47,6 +55,10 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         
         // Pause the view's session
         sceneView.session.pause()
+        
+        // Stop the animation timer
+        animationTimer?.invalidate()
+        animationTimer = nil
     }
     
     @objc func handleTap(_ gestureRecognize: UITapGestureRecognizer) {
@@ -88,6 +100,9 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         
         // Add the cube to the scene
         sceneView.scene.rootNode.addChildNode(cube)
+        
+        // Add to our array of gradient nodes to animate
+        gradientNodes.append(cube)
     }
     
     func createGradientCube() -> SCNNode {
@@ -95,6 +110,7 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         let width: CGFloat = 0.1
         let height: CGFloat = 0.1
         let length: CGFloat = 0.1
+        currentProgress = 0.0
         
         // Create a box with 6 segments in height to create the gradient effect
         let segments = 12
@@ -116,7 +132,7 @@ class ViewController: UIViewController, ARSCNViewDelegate {
             
             // Create a gradient layer for vertical faces
             if faceIndex == 0 || faceIndex == 1 || faceIndex == 2 || faceIndex == 3 {
-                // Create a gradient layer
+                // Create a new CAGradientLayer for each face that needs animation
                 let gradientLayer = CAGradientLayer()
                 gradientLayer.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
                 
@@ -126,9 +142,9 @@ class ViewController: UIViewController, ARSCNViewDelegate {
                     baseColor.withAlphaComponent(0.0).cgColor       // Top: Fully transparent
                 ]
                 
-                // Set direction (bottom to top)
+                // Set initial direction (bottom to top)
                 gradientLayer.startPoint = CGPoint(x: 0.5, y: 1.0)  // Bottom
-                gradientLayer.endPoint = CGPoint(x: 0.5, y: 0.0)    // Top
+                gradientLayer.endPoint = CGPoint(x: 0.5, y: 1.0)    // Top
                 
                 // Render the gradient to a UIImage
                 UIGraphicsBeginImageContextWithOptions(gradientLayer.frame.size, false, 0)
@@ -140,6 +156,10 @@ class ViewController: UIViewController, ARSCNViewDelegate {
                     // Set the image as the material content
                     material.diffuse.contents = gradientImage
                 }
+                
+                // Store the gradient layer in the node's userData dictionary for animation
+                // We need to create a unique key for each face
+                cubeNode.setValue(gradientLayer, forKey: "gradientLayer\(faceIndex)")
             } else {
                 // For top and bottom faces
                 if faceIndex == 4 {  // Top face
@@ -160,8 +180,60 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         
         // Assign materials to the cube
         cubeGeometry.materials = materials
-        
+        startGradientAnimation()
+
         return cubeNode
+    }
+    
+    // MARK: - Animation Methods
+    
+    func startGradientAnimation() {
+        // Create a timer to update the animation
+        animationTimer = Timer.scheduledTimer(timeInterval: 1/30, target: self, selector: #selector(updateGradientAnimation), userInfo: nil, repeats: true)
+    }
+    
+    @objc func updateGradientAnimation() {
+        if currentProgress / progressTime >= 1.0 {
+            animationTimer?.invalidate()
+            return
+        }
+        // Update animation step
+        currentProgress += 0.02
+        
+        // Loop through each cube node that has been created
+        for node in gradientNodes {
+            // Update the gradient for each of the 4 side faces
+            for faceIndex in 0..<4 {
+                // Get the gradient layer for this face
+                guard let gradientLayer = node.value(forKey: "gradientLayer\(faceIndex)") as? CAGradientLayer else {
+                    continue
+                }
+                
+                // Calculate wave positions using sine wave for organic motion
+                
+                // Create animated start and end points
+                // This will make the gradient move up and down
+                let startY = 1.0 - (currentProgress / progressTime)
+                let endY = 0.5 - (currentProgress / progressTime)  // Keep the distance between start and end consistent
+                let s = min(max(startY, 0), 1)
+                let e = min(max(endY, 0), 1)
+                // Update gradient points
+                gradientLayer.startPoint = CGPoint(x: 0.5, y: s)
+                gradientLayer.endPoint = CGPoint(x: 0.5, y: e)
+                
+                // Render updated gradient to a new image
+                UIGraphicsBeginImageContextWithOptions(gradientLayer.frame.size, false, 0)
+                if let context = UIGraphicsGetCurrentContext() {
+                    gradientLayer.render(in: context)
+                    let updatedImage = UIGraphicsGetImageFromCurrentImageContext()
+                    UIGraphicsEndImageContext()
+                    
+                    // Update the material with the new gradient image
+                    let material = node.geometry?.materials[faceIndex]
+                    material?.diffuse.contents = updatedImage
+                }
+            }
+        }
     }
     
     // MARK: - ARSCNViewDelegate
