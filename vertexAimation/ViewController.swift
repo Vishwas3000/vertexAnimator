@@ -56,8 +56,8 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Create a transform with the camera position
         let cameraTransform = frame.camera.transform
         
-        // Create the cube
-        let cube = createCube()
+        // Create the gradient cube
+        let cube = createGradientCube()
         
         // Position the cube at a fixed distance in front of the camera
         // Using the camera's orientation to determine the direction
@@ -90,75 +90,78 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         sceneView.scene.rootNode.addChildNode(cube)
     }
     
-    func createCube() -> SCNNode {
-        // Create a cube geometry
-        let cubeGeometry = SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0.01)
+    func createGradientCube() -> SCNNode {
+        // Create a custom cube geometry for gradient transparency
+        let width: CGFloat = 0.1
+        let height: CGFloat = 0.1
+        let length: CGFloat = 0.1
         
-        // Create material for the cube with shader modifier for animation
-        let material = SCNMaterial()
-        material.diffuse.contents = UIColor.blue
+        // Create a box with 6 segments in height to create the gradient effect
+        let segments = 12
+        let cubeGeometry = SCNBox(width: width, height: height, length: length, chamferRadius: 0.0)
+        cubeGeometry.heightSegmentCount = 1
         
-        // Add shader modifier for bottom-to-top reveal animation
-        material.shaderModifiers = [
-            SCNShaderModifierEntryPoint.surface: """
-            uniform float animationProgress = 0.0;
-            
-            #pragma body
-            
-            // Calculate clip boundary based on animation progress (0.0 to 1.0)
-            // This will reveal the cube from bottom to top
-            float clipBoundary = -0.5 + animationProgress;
-            
-            // Discard fragments below the current clip boundary
-            if (_surface.position.y < clipBoundary) {
-                discard_fragment();
-            }
-            
-            // Add glow effect near the reveal boundary
-            float distFromBoundary = abs(_surface.position.y - clipBoundary);
-            if (distFromBoundary < 0.05) {
-                float glowIntensity = 1.0 - (distFromBoundary / 0.05);
-                _surface.emission.rgb += float3(0.2, 0.4, 1.0) * glowIntensity;
-            }
-            """
-        ]
-        
-        // Assign material to the cube (for all sides)
-        cubeGeometry.materials = [material, material, material, material, material, material]
+        // Base color for the cube
+        let baseColor = UIColor.blue
         
         // Create a node with the cube geometry
         let cubeNode = SCNNode(geometry: cubeGeometry)
         
-        // Animate the appearance
-        animateCubeAppearance(cubeNode)
+        // Create multiple materials for the gradient effect
+        var materials: [SCNMaterial] = []
+        
+        // For each face of the cube (6 faces)
+        for faceIndex in 0..<6 {
+            let material = SCNMaterial()
+            
+            // Create a gradient layer for vertical faces
+            if faceIndex == 0 || faceIndex == 1 || faceIndex == 2 || faceIndex == 3 {
+                // Create a gradient layer
+                let gradientLayer = CAGradientLayer()
+                gradientLayer.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+                
+                // Set colors for the gradient (bottom to top)
+                gradientLayer.colors = [
+                    baseColor.withAlphaComponent(1.0).cgColor,      // Bottom: Fully visible
+                    baseColor.withAlphaComponent(0.0).cgColor       // Top: Fully transparent
+                ]
+                
+                // Set direction (bottom to top)
+                gradientLayer.startPoint = CGPoint(x: 0.5, y: 1.0)  // Bottom
+                gradientLayer.endPoint = CGPoint(x: 0.5, y: 0.0)    // Top
+                
+                // Render the gradient to a UIImage
+                UIGraphicsBeginImageContextWithOptions(gradientLayer.frame.size, false, 0)
+                if let context = UIGraphicsGetCurrentContext() {
+                    gradientLayer.render(in: context)
+                    let gradientImage = UIGraphicsGetImageFromCurrentImageContext()
+                    UIGraphicsEndImageContext()
+                    
+                    // Set the image as the material content
+                    material.diffuse.contents = gradientImage
+                }
+            } else {
+                // For top and bottom faces
+                if faceIndex == 4 {  // Top face
+                    material.diffuse.contents = baseColor.withAlphaComponent(0.0)
+                } else {  // Bottom face
+                    material.diffuse.contents = baseColor
+                }
+            }
+            
+            // Enable transparency
+            material.isDoubleSided = true
+            material.blendMode = .alpha
+            material.lightingModel = .physicallyBased
+            material.transparencyMode = .aOne
+            
+            materials.append(material)
+        }
+        
+        // Assign materials to the cube
+        cubeGeometry.materials = materials
         
         return cubeNode
-    }
-    
-    func animateCubeAppearance(_ cubeNode: SCNNode) {
-        // Get the materials from the cube's geometry
-        guard let materials = cubeNode.geometry?.materials else { return }
-        
-        // Set the initial animation progress to 0
-        for material in materials {
-            material.setValue(0.0, forKey: "animationProgress")
-        }
-        
-        // Create animation action
-        let animationDuration: TimeInterval = 10.0
-        
-        // Create an animation that changes the shader parameter over time
-        let animation = SCNAction.customAction(duration: animationDuration) { (node, elapsedTime) in
-            let progress = Float(elapsedTime / animationDuration)
-            
-            // Update animation progress for all materials
-            for material in materials {
-                material.setValue(progress, forKey: "animationProgress")
-            }
-        }
-        
-        // Run the animation
-        cubeNode.runAction(animation)
     }
     
     // MARK: - ARSCNViewDelegate
